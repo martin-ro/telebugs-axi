@@ -1,0 +1,18 @@
+{
+  "name": "telebugs-axi",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Agent-oriented Telebugs triage over the documented REST API",
+  "type": "module",
+  "bin": {
+    "telebugs-axi": "bin/telebugs-axi.js",
+    "telebugs-axi-session": "bin/telebugs-axi-session.js"
+  },
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check bin/telebugs-axi.js && node --check src/cli.js && node --check src/api.js && node scripts/skill.js --check",
+    "skill": "node scripts/skill.js"
+  },
+  "dependencies": { "axi-sdk-js": "0.1.11", "@toon-format/toon": "^2.1.0" }
+}
