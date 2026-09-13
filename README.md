@@ -82,7 +82,7 @@ Each invocation reads **one page**. Follow `has_more` and use `next_cursor` unch
 
 Stdout contains TOON data, errors, and command suggestions. There are no progress messages or raw HTTP error bodies. Exit codes are `0` for success or a no-op, `1` for an operational error, and `2` for invalid input.
 
-Lists show four fields by default. Use `--fields id,error_message,culprit` to select top-level fields, including fields not in the default view. Missing fields are `null`. Reports include all fields the API returns unless you select fields.
+Lists show four fields by default. Use `--fields id,error_message,culprit` to select top-level fields, including fields not in the default view. Missing fields are `null`. The `report` command includes all fields the API returns unless you select fields.
 
 Long strings show a preview and original character count. `--max-chars <n>` changes the default 1000-character preview. Nested arrays show up to 20 items and an omitted-item count. `--full` removes these preview limits, not redaction or pagination. Lists keep all rows returned by the requested page.
 
