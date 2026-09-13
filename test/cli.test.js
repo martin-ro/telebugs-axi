@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { resolve, join } from 'node:path';
+import { sessionStartHookStatus } from 'axi-sdk-js';
 import { decode, encode } from '@toon-format/toon';
 import { dispatch } from '../src/cli.js';
 import { configuration, request, redact, preview } from '../src/api.js';
@@ -205,22 +206,27 @@ test('CLI home, exit codes, help and safe errors work end to end', async t => {
 
 test('project hook setup is opt-in, repeatable, removable and stays in the test sandbox', async t => {
   const cwd = workspace(t), homeDir = join(cwd, 'home');
+  const hookStatus = () => sessionStartHookStatus({ marker: 'telebugs-axi', scope: 'project', projectDir: cwd, homeDir });
   mkdirSync(homeDir);
   mkdirSync(join(cwd, '.claude'));
   writeFileSync(join(cwd, '.claude/settings.json'), JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'echo unrelated' }] }] } }));
   await dispatch('setup', ['hooks', '--project', '1'], { cwd, homeDir });
-  const paths = ['.claude/settings.json', '.codex/hooks.json'];
-  // The SDK owns plugin filenames; inspect its directory rather than assume one.
-  assert.ok(existsSync(join(cwd, '.opencode/plugins')));
-  const first = paths.map(path => readFileSync(join(cwd, path), 'utf8'));
+  const installed = hookStatus();
+  assert.equal(installed.scope, 'project');
+  assert.equal(installed.claude.installed, true);
+  assert.equal(installed.codex.installed, true);
+  assert.equal(installed.codex.userFeatureEnabled, true);
+  assert.equal(installed.opencode.installed, true);
   await dispatch('setup', ['hooks', '--project', '1'], { cwd, homeDir });
-  assert.deepEqual(paths.map(path => readFileSync(join(cwd, path), 'utf8')), first);
-  assert.match(readFileSync(join(homeDir, '.codex/config.toml'), 'utf8'), /hooks = true/);
+  assert.deepEqual(hookStatus(), installed);
   await dispatch('setup', ['remove'], { cwd, homeDir });
-  const settings = readFileSync(join(cwd, '.claude/settings.json'), 'utf8');
-  assert.match(settings, /echo unrelated/);
-  assert.doesNotMatch(settings, /telebugs-axi/);
-  assert.ok(existsSync(join(cwd, '.telebugs-axi.json')));
+  const removed = hookStatus();
+  assert.equal(removed.claude.installed, false);
+  assert.equal(removed.codex.installed, false);
+  assert.equal(removed.codex.userFeatureEnabled, true);
+  assert.equal(removed.opencode.installed, false);
+  assert.deepEqual(JSON.parse(readFileSync(join(cwd, '.claude/settings.json'), 'utf8')).hooks.SessionStart, [{ hooks: [{ type: 'command', command: 'echo unrelated' }] }]);
+  assert.deepEqual(JSON.parse(readFileSync(join(cwd, '.telebugs-axi.json'), 'utf8')), { project: 1 });
   const empty = workspace(t);
   const session = spawnSync(process.execPath, [resolve('bin/telebugs-axi-session.js')], { cwd: empty, encoding: 'utf8', env: { ...process.env, TELEBUGS_URL: '', TELEBUGS_API_KEY: '' } });
   assert.equal(session.status, 0);
