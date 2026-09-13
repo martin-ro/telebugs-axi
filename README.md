@@ -60,8 +60,9 @@ Do not put a URL or key in this file. Add it and local agent settings to your pr
 | `telebugs-axi unmute 42 --project 1 --confirm` | Clear group mute conditions |
 | `telebugs-axi setup hooks --project 1` | Install project-scoped agent context |
 | `telebugs-axi setup remove` | Remove managed hooks, keep project selection |
+| `telebugs-axi update --help` | Explain source-only updates; no registry updater is available |
 
-Every command accepts `--help`. Bare `--version`, `-v`, and `-V` print the version without loading the command graph. Flags go after the command. Unknown commands, flags, duplicate flags, missing values, and extra arguments fail before a request is sent.
+Every command accepts `--help`, including `setup hooks`, `setup remove`, and `update`. Help lists each command's flags, defaults, required arguments, and examples. Bare `--version`, `-v`, and `-V` print the version without loading the command graph. Flags go after the command or setup subcommand. Unknown flags are named with the valid flags inline. Unknown commands, duplicate flags, missing values, and extra arguments fail before a request is sent, including extra arguments with `--help`.
 
 ### Search and pagination
 
@@ -84,7 +85,7 @@ Stdout contains TOON data, errors, and command suggestions. There are no progres
 
 Lists show four fields by default. Use `--fields id,error_message,culprit` to select top-level fields, including fields not in the default view. Missing fields are `null`. The `report` command includes all fields the API returns unless you select fields.
 
-Long strings show a preview and original character count. `--max-chars <n>` changes the default 1000-character preview. Nested arrays show up to 20 items and an omitted-item count. `--full` removes these preview limits, not redaction or pagination. Lists keep all rows returned by the requested page.
+Long strings show a preview and original size in UTF-16 units. `--max-chars <n>` changes the default 1000-unit preview without splitting a Unicode character. Invalid Unicode is rejected rather than silently replaced. Nested arrays show up to 20 items and an omitted-item count. `--full` removes these preview limits, not redaction or pagination. Lists keep all rows returned by the requested page.
 
 Example with synthetic data:
 
@@ -122,9 +123,9 @@ This explicit command writes the numeric project selection and installs or repai
 
 The SDK also enables `[features].hooks = true` in the **user's** `~/.codex/config.toml`. This shared flag is kept on removal. Ordinary commands do not change agent settings. Repeated setup is a no-op when the path and project have not changed. Unrelated hooks are kept.
 
-The hook executable reads only the current directory's project selection. It prints nothing in unrelated directories. The agent process must inherit the authentication environment. No transcript or session-end data is saved. Run setup again after moving the CLI checkout. Hook setup currently requires a POSIX install path containing only letters, digits, underscores, dots, slashes, and hyphens because the SDK does not quote hook executable paths.
+The hook executable reads only the current directory's project selection. It prints nothing in unrelated directories. The agent process must inherit the authentication environment. No transcript or session-end data is saved. Setup uses a PATH binary only when the first executable match is this installation; otherwise it uses the absolute path. Relative PATH entries also cause an absolute-path fallback. Run setup again after moving the CLI checkout. Hook setup currently requires a POSIX install path containing only letters, digits, underscores, dots, slashes, and hyphens because the SDK does not quote hook executable paths.
 
-**Alternative: on-demand skill.** Copy `skills/telebugs-axi/SKILL.md` to a skill location supported by your agent. Install the CLI separately. The skill has no per-session network call. It is generated from the same static guidance as the home interface. You need only one integration, but can use both.
+**Alternative: on-demand skill.** Copy `skills/telebugs-axi/SKILL.md` to a skill location supported by your agent. Install the CLI separately. The skill has no per-session network call. It is generated from the same static guidance and examples printed after the home dashboard's live data. Its commands use the local Node executable form, not a global install. CI rejects a stale generated skill. You need only one integration, but can use both.
 
 ## Privacy
 
@@ -141,7 +142,9 @@ npm run check
 npm run skill  # regenerate the on-demand skill after changing guidance
 ```
 
-Tests cover command routing, strict input handling, TOON, pagination, previews, redaction, idempotent writes, authentication, HTTP failures, redirects, malformed JSON, timeouts, and hook lifecycle in a disposable local directory. CI needs no Telebugs credentials. No live test is required.
+Output targets TOON specification 4.1. The package override gives the SDK and application the same pinned encoder; the SDK's published dependency range still targets TOON 2. Regression tests cover both output paths.
+
+Tests cover command routing, strict input and subcommand help, TOON quoting and nested tables, Unicode previews, target-preserving hints, generated-skill drift, pagination, redaction, idempotent writes, authentication, HTTP failures, redirects, malformed JSON, timeouts, and hook lifecycle in a disposable local directory. CI needs no Telebugs credentials. No live test is required.
 
 Authoritative interface references:
 

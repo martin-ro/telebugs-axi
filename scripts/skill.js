@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { DESCRIPTION, NEXT, GUIDE } from '../src/guidance.js';
 
 const path = new URL('../skills/telebugs-axi/SKILL.md', import.meta.url);
+const executable = 'node /absolute/path/to/telebugs-axi/bin/telebugs-axi.js';
 const content = `---
 name: telebugs-axi
 description: Use when asked to inspect Telebugs errors, search groups, read reports, or resolve, reopen, mute, or unmute an error group.
@@ -12,13 +13,11 @@ description: Use when asked to inspect Telebugs errors, search groups, read repo
 ${DESCRIPTION}
 
 Install this unpublished CLI from https://github.com/martin-ro/telebugs-axi into a local checkout with npm ci.
-Run node /absolute/path/to/telebugs-axi/bin/telebugs-axi.js in place of telebugs-axi below. No global install is needed.
+Replace /absolute/path/to/telebugs-axi with your checkout path. No global install is needed.
 
-${GUIDE}
+${GUIDE.replaceAll('telebugs-axi ', `${executable} `)}
 \`\`\`sh
-${NEXT.join('\n')}
-telebugs-axi resolve <group-id> --project <id> --confirm
-telebugs-axi --help
+${NEXT.map(command => command.replace(/^telebugs-axi\b/, executable)).join('\n')}
 \`\`\`
 `;
 if (process.argv.includes('--check')) {

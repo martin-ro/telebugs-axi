@@ -2,11 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync, chmodSync, symlinkSync, copyFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
-import { sessionStartHookStatus } from 'axi-sdk-js';
+import { AxiError, sessionStartHookStatus } from 'axi-sdk-js';
 import { decode, encode } from '@toon-format/toon';
-import { dispatch } from '../src/cli.js';
+import { dispatch, commandHelp } from '../src/cli.js';
+import { GUIDE, NEXT } from '../src/guidance.js';
 import { configuration, request, redact, preview } from '../src/api.js';
 
 const bin = resolve('bin/telebugs-axi.js');
@@ -50,6 +51,9 @@ test('strict validation happens before transport, including with help', async ()
     ['resolve', ['4', '--project', '1']], ['mute', ['../4', '--project', '1', '--confirm']],
     ['unmute', ['4', '--project', '9007199254740992', '--confirm']],
     ['projects', ['extra']], ['setup', ['hooks']], ['setup', ['remove', '--project', '1']],
+    ['setup', ['remove', '--project', '1', '--help']], ['setup', ['unknown', '--help']],
+    ['groups', ['extra', '--help']], ['report', ['1', '2', '--help']],
+    ['update', ['--wat']], ['update', ['extra']],
   ]) {
     await assert.rejects(dispatch(command, args, { api }), { code: 'VALIDATION_ERROR' });
   }
@@ -84,7 +88,7 @@ test('pagination, empty states, field selection and previews stay explicit', asy
   assert.equal(result.groups.length, 50);
   assert.equal(result.total, null);
   assert.equal(result.next_cursor, 9);
-  assert.match(result.groups[0].error_message, /1200 chars total; use --full/);
+  assert.match(result.groups[0].error_message, /1200 UTF-16 units total; use --full/);
   assert.ok(result.help.some(hint => hint.includes('--query \'is:unresolved\'') && hint.endsWith('--cursor <next_cursor>')));
   const full = await dispatch('groups', [...args, '--full'], { api: async () => page('groups', rows) });
   assert.equal(full.groups[0].error_message.length, 1200);
@@ -182,6 +186,13 @@ test('CLI home, exit codes, help and safe errors work end to end', async t => {
   assert.equal(home.stderr, '');
   assert.equal(decode(home.stdout).bin, bin.replace(process.env.HOME, '~'));
   assert.deepEqual(decode(home.stdout).projects, []);
+  assert.equal(decode(home.stdout).guidance, GUIDE);
+  assert.deepEqual(decode(home.stdout).examples, NEXT);
+  const skill = readFileSync('skills/telebugs-axi/SKILL.md', 'utf8');
+  const executable = 'node /absolute/path/to/telebugs-axi/bin/telebugs-axi.js';
+  assert.ok(skill.includes(GUIDE.replaceAll('telebugs-axi ', `${executable} `)));
+  for (const example of NEXT) assert.ok(skill.includes(example.replace(/^telebugs-axi\b/, executable)));
+  assert.doesNotMatch(skill, /^telebugs-axi /m);
   writeFileSync(join(cwd, '.telebugs-axi.json'), '{"project":1}');
   assert.equal(decode((await cli([], cwd, env)).stdout).project, 1);
   for (const args of [['unknown'], ['constructor'], ['__proto__'], ['groups', '--wat'], ['resolve', '2', '--project', '1']]) {
@@ -190,8 +201,10 @@ test('CLI home, exit codes, help and safe errors work end to end', async t => {
     assert.equal(decode(result.stdout).code, 'VALIDATION_ERROR');
     assert.equal(result.stderr, '');
   }
-  for (const command of ['projects', 'groups', 'reports', 'report', 'resolve', 'unresolve', 'mute', 'unmute', 'setup']) {
-    assert.equal((await cli([command, '--help'], cwd)).code, 0);
+  for (const command of ['projects', 'groups', 'reports', 'report', 'resolve', 'unresolve', 'mute', 'unmute', 'setup', 'setup hooks', 'setup remove', 'update']) {
+    const result = await cli([...command.split(' '), '--help'], cwd);
+    assert.equal(result.code, 0);
+    assert.equal(result.stderr, '');
   }
   assert.equal(calls, 2);
   const noAuth = await cli(['projects'], cwd);
@@ -202,6 +215,7 @@ test('CLI home, exit codes, help and safe errors work end to end', async t => {
   assert.equal(error.code, 1);
   assert.doesNotMatch(error.stdout + error.stderr, /fixture-private-error-payload|tlbgs_fixture_only/);
   assert.match(error.stdout, /outcome may be unknown/);
+  assert.ok(decode(error.stdout).help.includes('telebugs-axi groups --project 1'));
 });
 
 test('project hook setup is opt-in, repeatable, removable and stays in the test sandbox', async t => {
@@ -248,4 +262,128 @@ test('version aliases work without loading the dependency graph', t => {
     assert.equal(result.status, 0);
   }
   assert.ok(Math.min(...timings) < Math.max(...floor) * 5, 'version should stay near Node startup cost');
+});
+
+test('TOON 4.1 and Unicode previews stay valid through the SDK output boundary', async t => {
+  assert.equal(encode({ rows: [{ text: '#data' }] }), 'rows[1]{text}:\n  "#data"');
+  assert.equal(encode({ rows: [{ id: 1, nested: { a: 'x' } }, { id: 2, nested: { a: 'y' } }] }), 'rows[2]{id,nested{a}}:\n  1,x\n  2,y');
+  assert.equal(encode({ a: { x: 1 }, b: { x: 2 } }), '[2:]{x}:\n  a: 1\n  b: 2');
+  assert.throws(() => encode({ text: '\ud800' }), /unpaired surrogate/);
+  const text = 'a'.repeat(999) + '\u{1F600}';
+  const compact = preview(text);
+  assert.equal(compact.value.isWellFormed(), true);
+  assert.ok(compact.value.startsWith('a'.repeat(999) + '...'));
+  assert.equal(preview(text, true).value, text);
+  assert.equal(preview('\u{1F600}x', false, 1).value.isWellFormed(), true);
+
+  let body = { id: 3, text, rows: [{ text: '#data' }], nested: { a: { x: 1 }, b: { x: 2 } }, tlbgs_fixture_key_name: 'safe' };
+  const env = await server(t, (req, res) => res.end(JSON.stringify(body)));
+  const cwd = workspace(t), args = ['report', '3', '--group', '2', '--project', '1'];
+  const result = await cli(args, cwd, env);
+  assert.equal(result.code, 0);
+  assert.equal(result.stderr, '');
+  const data = decode(result.stdout);
+  assert.equal(data.report.text, compact.value);
+  assert.deepEqual(data.report.rows, [{ text: '#data' }]);
+  assert.deepEqual(data.report.nested, { a: { x: 1 }, b: { x: 2 } });
+  assert.doesNotMatch(result.stdout, /tlbgs_fixture_key_name|\uFFFD/);
+  const full = decode((await cli([...args, '--full'], cwd, env)).stdout);
+  assert.equal(full.report.text, text);
+  assert.equal(full.help, undefined);
+  body = { id: 3, text: '\ud800' };
+  const invalid = await cli(args, cwd, env);
+  assert.equal(invalid.code, 1);
+  assert.equal(invalid.stderr, '');
+  assert.equal(decode(invalid.stdout).code, 'LOCAL_ERROR');
+});
+
+test('help and corrections use the command flags and preserve known targets', async t => {
+  const report = commandHelp('report');
+  assert.deepEqual(report.required, ['--group']);
+  assert.match(report.usage, /<report-id>/);
+  assert.match(report.fields, /All available/);
+  assert.equal(Object.hasOwn(report.flags, '--limit <value>'), false);
+  assert.deepEqual(commandHelp('resolve').required, ['--confirm']);
+  assert.equal(Object.hasOwn(commandHelp('resolve').flags, '--max-chars <value>'), false);
+  assert.deepEqual(Object.keys(commandHelp('setup remove').flags), ['--help']);
+  assert.deepEqual(commandHelp('setup hooks').required, ['--project']);
+  assert.equal(commandHelp('groups').examples.length, 2);
+  let calls = 0;
+  const api = async () => { calls++; };
+  await assert.rejects(dispatch('groups', ['--wat'], { api }), error => {
+    assert.match(error.message, /Unknown flag --wat for groups/);
+    assert.ok(error.suggestions[0].includes('--query'));
+    return true;
+  });
+  await assert.rejects(dispatch('resolve', ['999', '--project', '7'], { api }), error => {
+    assert.deepEqual(error.suggestions, ["telebugs-axi resolve '999' --project '7' --confirm"]);
+    return true;
+  });
+  await assert.rejects(dispatch('report', ['999', '--project', '7'], { api }), error => {
+    assert.deepEqual(error.suggestions, ["telebugs-axi report '999' --project '7' --group '<group-id>'"]);
+    return true;
+  });
+  assert.equal(calls, 0);
+  const cwd = workspace(t);
+  const invalidLimit = await cli(['groups', '--project', '7', '--limit', '101'], cwd);
+  assert.equal(invalidLimit.code, 2);
+  const help = decode(decode(invalidLimit.stdout).help[0]);
+  assert.equal(help.usage, 'telebugs-axi groups [flags]');
+  assert.ok(Object.hasOwn(help.flags, '--limit <value>'));
+  const unavailable = await cli(['update'], cwd);
+  assert.equal(unavailable.code, 1);
+  assert.equal(decode(unavailable.stdout).code, 'UNAVAILABLE');
+  await assert.rejects(dispatch('resolve', ['999', '--project', '7', '--confirm'], { api: async () => { throw new AxiError('Read the group before retrying.', 'TRANSPORT'); } }), error => {
+    assert.deepEqual(error.suggestions, ['telebugs-axi groups --project 7']);
+    return true;
+  });
+});
+
+test('next steps follow the result without losing read scope', async () => {
+  const args = ['--project', '7', '--query', 'is:resolved'];
+  const result = await dispatch('groups', args, { api: async () => page('groups', [{ id: 99, resolved: true, muted: false }]) });
+  assert.ok(result.help.includes('telebugs-axi unresolve <group-id> --project 7 --confirm'));
+  assert.ok(!result.help.some(hint => hint.startsWith('telebugs-axi resolve ')));
+  const empty = await dispatch('groups', args, { api: async () => page('groups') });
+  assert.deepEqual(empty.help, ["telebugs-axi groups --project '7'"]);
+  const none = await dispatch('groups', ['--project', '7'], { api: async () => page('groups') });
+  assert.equal(none.help, undefined);
+  const paged = await dispatch('reports', ['999', '--project', '7', '--since', '2026-01-01'], { api: async () => page('reports', [], true) });
+  assert.equal(paged.total, null);
+  assert.ok(paged.help.includes("telebugs-axi reports '999' --project '7' --since '2026-01-01' --cursor <next_cursor>"));
+  const mutation = await dispatch('resolve', ['999', '--project', '7', '--confirm'], { api: async () => ({ processed: 0 }) });
+  assert.equal(mutation.changed, false);
+  assert.equal(mutation.help, undefined);
+});
+
+test('hook setup uses only the first executable PATH match and repairs stale commands', async t => {
+  const cwd = workspace(t), homeDir = join(cwd, 'home'), bins = join(cwd, 'bin'), shadow = join(cwd, 'shadow');
+  mkdirSync(homeDir); mkdirSync(bins); mkdirSync(shadow);
+  const session = resolve('bin/telebugs-axi-session.js');
+  symlinkSync(session, join(bins, 'telebugs-axi-session'));
+  const other = join(shadow, 'telebugs-axi-session');
+  writeFileSync(other, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  const oldPath = process.env.PATH;
+  t.after(() => { if (oldPath === undefined) delete process.env.PATH; else process.env.PATH = oldPath; });
+  for (const [path, expected] of [[bins, 'telebugs-axi-session'], [`${shadow}:${bins}`, session], [`.:${bins}`, session]]) {
+    process.env.PATH = path;
+    await dispatch('setup', ['hooks', '--project', '1'], { cwd, homeDir });
+    const settings = JSON.parse(readFileSync(join(cwd, '.claude/settings.json'), 'utf8'));
+    assert.deepEqual(Object.keys(settings.hooks), ['SessionStart']);
+    assert.equal(settings.hooks.SessionStart[0].hooks[0].command, expected);
+  }
+  chmodSync(other, 0o644);
+  process.env.PATH = `${shadow}:${bins}`;
+  await dispatch('setup', ['hooks', '--project', '1'], { cwd, homeDir });
+  assert.equal(JSON.parse(readFileSync(join(cwd, '.codex/hooks.json'), 'utf8')).hooks.SessionStart[0].hooks[0].command, 'telebugs-axi-session');
+});
+
+test('generated skill check fails on stale content in an isolated copy', t => {
+  const cwd = workspace(t);
+  for (const dir of ['src', 'scripts', 'skills/telebugs-axi']) mkdirSync(join(cwd, dir), { recursive: true });
+  for (const path of ['src/guidance.js', 'scripts/skill.js']) copyFileSync(path, join(cwd, path));
+  writeFileSync(join(cwd, 'skills/telebugs-axi/SKILL.md'), 'stale fixture');
+  const stale = spawnSync(process.execPath, [join(cwd, 'scripts/skill.js'), '--check'], { encoding: 'utf8' });
+  assert.equal(stale.status, 1);
+  assert.match(stale.stderr, /Skill is stale/);
 });

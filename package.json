@@ -14,5 +14,6 @@
     "check": "node --check bin/telebugs-axi.js && node --check src/cli.js && node --check src/api.js && node scripts/skill.js --check",
     "skill": "node scripts/skill.js"
   },
-  "dependencies": { "axi-sdk-js": "0.1.11", "@toon-format/toon": "^2.1.0" }
+  "dependencies": { "axi-sdk-js": "0.1.11", "@toon-format/toon": "4.1.1" },
+  "overrides": { "axi-sdk-js": { "@toon-format/toon": "$@toon-format/toon" } }
 }

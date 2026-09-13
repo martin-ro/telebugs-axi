@@ -1,6 +1,6 @@
 import { AxiError } from 'axi-sdk-js';
 
-export function usage(message, suggestions = ['telebugs-axi --help']) {
+export function usage(message, suggestions = []) {
   throw new AxiError(message, 'VALIDATION_ERROR', suggestions);
 }
 
@@ -16,11 +16,11 @@ export function configuration(env = process.env) {
   try { url = new URL(env.TELEBUGS_URL); } catch { /* Report no private URL. */ }
   if (!url || url.username || url.password || url.search || url.hash || url.pathname !== '/' ||
       !(url.protocol === 'https:' || (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))) {
-    throw new AxiError('Set TELEBUGS_URL to your HTTPS instance origin, without a path or credentials.', 'CONFIG', ['telebugs-axi --help']);
+    throw new AxiError('Set TELEBUGS_URL to your HTTPS instance origin, without a path or credentials.', 'CONFIG');
   }
   const token = env.TELEBUGS_API_KEY;
   if (!token || /\s/.test(token)) {
-    throw new AxiError('Set TELEBUGS_API_KEY from Account Settings > API access. Do not use a project DSN.', 'AUTH', ['telebugs-axi --help']);
+    throw new AxiError('Set TELEBUGS_API_KEY from Account Settings > API access. Do not use a project DSN.', 'AUTH');
   }
   return { url, token };
 }
@@ -46,7 +46,7 @@ export async function request(path, { method = 'GET', query = {}, body, env = pr
         401: 'Replace TELEBUGS_API_KEY with a valid account API key.',
         403: 'Ask an administrator to check your project access.',
         404: 'Check the project, group, and report IDs and your access.',
-        422: 'Check command arguments against telebugs-axi --help.',
+        422: 'Telebugs rejected the arguments. Check IDs, search syntax, and date filters.',
         429: 'Wait before retrying. No automatic retry was made.',
       };
       throw new AxiError(`Telebugs returned HTTP ${response.status}.`, `HTTP_${response.status}`,
@@ -72,9 +72,9 @@ export function redact(value, token = process.env.TELEBUGS_API_KEY) {
   if (value && typeof value === 'object') {
     const sensitive = /token|secret|password|authorization|cookie|api[_-]?key|dsn/i;
     if (sensitive.test(String(value.key ?? value.name ?? ''))) {
-      return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, ['value', 'data'].includes(key) ? '[REDACTED]' : redact(item, token)]));
+      return Object.fromEntries(Object.entries(value).map(([key, item]) => [redact(key, token), ['value', 'data'].includes(key) ? '[REDACTED]' : redact(item, token)]));
     }
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, sensitive.test(key) ? '[REDACTED]' : redact(item, token)]));
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [redact(key, token), sensitive.test(key) ? '[REDACTED]' : redact(item, token)]));
   }
   return value;
 }
@@ -84,7 +84,8 @@ export function preview(value, full = false, max = 1000) {
   function visit(item) {
     if (!full && typeof item === 'string' && item.length > max) {
       truncated = true;
-      return `${item.slice(0, max)}... (truncated, ${item.length} chars total; use --full)`;
+      const end = /[\uD800-\uDBFF]/.test(item[max - 1]) && /[\uDC00-\uDFFF]/.test(item[max]) ? max - 1 : max;
+      return `${item.slice(0, end)}... (truncated, ${item.length} UTF-16 units total; use --full)`;
     }
     if (Array.isArray(item)) {
       const result = item.slice(0, full ? undefined : 20).map(visit);
